@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Inra System Cleaner
+Comment=Smart, Universal Linux Package Purger and System Cleaner
+Exec=inra --gui
+Icon=inra
+Terminal=false
+Type=Application
+Categories=System;Settings;Utility;
+Keywords=cleanup;clean;purge;orphan;pacman;apt;dnf;

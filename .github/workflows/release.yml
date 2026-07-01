@@ -1,0 +1,48 @@
+name: Release Inra Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Build & Publish Release Packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-size: '3.x'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y alien rpm dpkg-dev
+
+      - name: Run Build Packaging Script
+        run: |
+          # Get version from git tag (e.g. refs/tags/v1.0.0 -> 1.0.0)
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          if [ -z "$TAG_VERSION" ] || [ "$TAG_VERSION" = "$GITHUB_REF" ]; then
+            TAG_VERSION="1.0.0"
+          fi
+          ./build_packages.sh "$TAG_VERSION"
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release v${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            dist/inra-*.tar.gz
+            dist/inra-*.deb
+            dist/inra-*.rpm
+            dist/inra-*-universal.AppImage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
