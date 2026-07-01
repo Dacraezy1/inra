@@ -150,7 +150,6 @@ class PacmanBackend:
         return data
 
     def clean_cache(self, mode):
-        # Modes: 1 (keep 3), 2 (keep 1), 3 (remove uninstalled), 4 (clean all)
         cmds = {
             "1": ["sudo", "paccache", "-r"],
             "2": ["sudo", "paccache", "-rk1"],
@@ -242,32 +241,26 @@ class AptBackend:
             if desc_lines:
                 desc = desc + " " + " ".join(desc_lines)
             
-            # Clean up desc formatting
             desc = re.sub(r'\s+', ' ', desc).strip()
 
-            # Parse size (dpkg status gives size in KB)
             size_kb = int(pkg_data.get("installed-size", 0))
             isize = size_kb * 1024
 
-            # Auto/Explicit status
             reason = 1 if name in auto_installed else 0
 
             # Depends / Pre-Depends
             depends = []
             for dep_field in ["depends", "pre-depends"]:
                 if dep_field in pkg_data:
-                    # Clean up depends specifications (remove version bounds)
                     parts = pkg_data[dep_field].split(",")
                     for part in parts:
                         part = part.strip()
-                        # Handle alternative dependencies (take the first one)
                         alt = part.split("|")[0].strip()
-                        # Strip version constraints like (>= 1.0)
                         clean_name = re.sub(r'\(.*\)', '', alt).strip()
                         if clean_name:
                             depends.append(clean_name)
 
-            # Recommends / Suggests -> mapped to optdepends
+            # Recommends / Suggests
             optdepends = []
             for opt_field in ["recommends", "suggests"]:
                 if opt_field in pkg_data:
@@ -283,11 +276,8 @@ class AptBackend:
             has_gui = False
             is_font = False
             
-            # Look at dpkg info file list
             info_list_path = f"/var/lib/dpkg/info/{name}.list"
-            # Some packages are multi-arch: name:amd64.list
             if not os.path.exists(info_list_path):
-                # Search for it
                 dpkg_info_dir = "/var/lib/dpkg/info"
                 if os.path.exists(dpkg_info_dir):
                     try:
@@ -316,10 +306,8 @@ class AptBackend:
             if not is_font and (name_lower.startswith("fonts-") or name_lower.endswith("-fonts") or "font" in name_lower):
                 is_font = True
 
-            # Licenses in Debian aren't stored globally in status. Use homepage URL.
             url = pkg_data.get("homepage", "")
 
-            # Provides
             provides = []
             if "provides" in pkg_data:
                 provides = [p.strip() for p in pkg_data["provides"].split(",")]
@@ -334,7 +322,7 @@ class AptBackend:
                 depends=depends,
                 optdepends=optdepends,
                 provides=provides,
-                installdate=0 # dpkg status doesn't record install date
+                installdate=0
             )
             p.has_gui = has_gui
             p.is_font = is_font
@@ -343,7 +331,6 @@ class AptBackend:
         return packages
 
     def clean_cache(self, mode):
-        # Modes: 1 (autoclean), 2 (autoclean), 3 (autoclean), 4 (clean)
         if str(mode) == "4":
             return ["sudo", "apt-get", "clean"]
         return ["sudo", "apt-get", "autoclean"]
@@ -368,7 +355,6 @@ class RpmBackend:
             raise PackageManagerError("RPM command not found in PATH")
 
     def get_installed_packages(self):
-        # 1. Fetch reasons from dnf (if available)
         reasons = {}
         if shutil.which("dnf"):
             try:
@@ -381,7 +367,6 @@ class RpmBackend:
             except Exception:
                 pass
 
-        # 2. Query all packages via RPM queryformat
         qf = "PKG:%{NAME}\\nVER:%{VERSION}\\nSIZ:%{SIZE}\\nURL:%{URL}\\nSUM:%{SUMMARY}\\nDEP:[%{REQUIRENAME}, ]\\nPROV:[%{PROVIDENAME}, ]\\nINSTALL:%{INSTALLTIME}\\n\\n"
         try:
             res = subprocess.run(["rpm", "-qa", "--queryformat", qf], capture_output=True, text=True, errors='ignore')
@@ -391,14 +376,11 @@ class RpmBackend:
         except Exception as e:
             raise PackageManagerError(f"Failed to query rpm: {e}")
 
-        # 3. Find GUI packages using /usr/share/applications file map
         gui_packages = set()
         if os.path.exists("/usr/share/applications"):
             try:
                 desktops = [os.path.join("/usr/share/applications", f) for f in os.listdir("/usr/share/applications") if f.endswith(".desktop")]
                 if desktops:
-                    # Run rpm -qf on desktop files in batches to speed up
-                    # Construct single command
                     batch_cmd = ["rpm", "-qf", "--queryformat", "%{NAME}\\n"] + desktops[:200]
                     res_gui = subprocess.run(batch_cmd, capture_output=True, text=True, errors='ignore')
                     if res_gui.returncode == 0:
@@ -424,10 +406,8 @@ class RpmBackend:
             if not name:
                 continue
 
-            # Reason
             reason = reasons.get(name, 0)
 
-            # Dependencies
             depends = []
             dep_str = pkg_data.get("DEP", "[]")
             if dep_str.startswith("[") and dep_str.endswith("]"):
@@ -435,7 +415,6 @@ class RpmBackend:
                 if dep_str:
                     depends = [d.strip() for d in dep_str.split(",") if d.strip() and not d.strip().startswith("rpmlib")]
 
-            # Provides
             provides = []
             prov_str = pkg_data.get("PROV", "[]")
             if prov_str.startswith("[") and prov_str.endswith("]"):
@@ -443,10 +422,8 @@ class RpmBackend:
                 if prov_str:
                     provides = [p.strip() for p in prov_str.split(",") if p.strip()]
 
-            # Size
             size = int(pkg_data.get("SIZ", 0))
 
-            # GUI / Fonts
             has_gui = name in gui_packages
             name_lower = name.lower()
             is_font = name_lower.startswith("google-") or name_lower.startswith("fonts-") or "font" in name_lower
@@ -483,6 +460,438 @@ class RpmBackend:
     def get_uninstall_cmd(self, packages):
         return ["dnf", "remove"] + packages
 
+
+class XbpsBackend:
+    """Void Linux XBPS Backend - Parses XML package plist directly or runs xbps CLI queries."""
+    def __init__(self):
+        self.db_path = "/var/db/xbps/pkgdb-0.3.plist"
+        if not os.path.exists(self.db_path) and not shutil.which("xbps-query"):
+            raise PackageManagerError("XBPS package database or commands not found")
+
+    def get_installed_packages(self):
+        packages = []
+        
+        # 1. Parse plist directly (Fast pure-python path)
+        if os.path.exists(self.db_path):
+            import plistlib
+            try:
+                with open(self.db_path, 'rb') as f:
+                    db_data = plistlib.load(f)
+                
+                if isinstance(db_data, dict):
+                    entries = []
+                    if "_meta" in db_data or "pkgname" in next(iter(db_data.values()), {}):
+                        entries = db_data.values()
+                    elif "packages" in db_data:
+                        entries = db_data["packages"].values()
+                    else:
+                        entries = db_data.values()
+
+                    for pkg_info in entries:
+                        if not isinstance(pkg_info, dict):
+                            continue
+                        name = pkg_info.get("pkgname")
+                        if not name:
+                            continue
+                        
+                        version = pkg_info.get("version", "")
+                        desc = pkg_info.get("short_desc", "")
+                        size = int(pkg_info.get("installed_size", 0))
+                        
+                        is_auto = pkg_info.get("automatic-install", False)
+                        reason = 1 if is_auto else 0
+                        
+                        depends = []
+                        dep_list = pkg_info.get("run_depends", [])
+                        for dep in dep_list:
+                            clean_name = re.split(r'[<>=]', dep)[0].strip()
+                            if clean_name:
+                                depends.append(clean_name)
+                                
+                        provides = []
+                        prov_list = pkg_info.get("provides", [])
+                        for prov in prov_list:
+                            clean_name = re.split(r'[<>=]', prov)[0].strip()
+                            if clean_name:
+                                provides.append(clean_name)
+                                
+                        url = pkg_info.get("homepage", "")
+                        license_str = pkg_info.get("license", "")
+                        licenses = [l.strip() for l in license_str.split(",") if l.strip()]
+                        
+                        name_lower = name.lower()
+                        is_font = name_lower.startswith("font-") or "font" in name_lower
+                        
+                        has_gui = False
+                        files_list = pkg_info.get("files", [])
+                        for fn in files_list:
+                            if "usr/share/applications/" in fn and fn.endswith(".desktop"):
+                                has_gui = True
+                                break
+                        
+                        p = Package(
+                            name=name,
+                            version=version,
+                            desc=desc,
+                            isize=size,
+                            reason=reason,
+                            url=url,
+                            licenses=licenses,
+                            depends=depends,
+                            provides=provides,
+                            installdate=0
+                        )
+                        p.has_gui = has_gui
+                        p.is_font = is_font
+                        packages.append(p)
+                    
+                    return packages
+            except Exception:
+                pass
+
+        # 2. Fallback to CLI
+        try:
+            res = subprocess.run(["xbps-query", "-l"], capture_output=True, text=True, errors='ignore')
+            if res.returncode == 0:
+                auto_installs = set()
+                res_auto = subprocess.run(["xbps-query", "-O"], capture_output=True, text=True, errors='ignore')
+                if res_auto.returncode == 0:
+                    for line in res_auto.stdout.splitlines():
+                        auto_installs.add(line.strip())
+                
+                for line in res.stdout.splitlines():
+                    parts = line.strip().split(None, 2)
+                    if len(parts) >= 2 and parts[0] == "ii":
+                        pkg_ver = parts[1]
+                        name = re.sub(r'-[0-9].*$', '', pkg_ver)
+                        desc = parts[2] if len(parts) > 2 else ""
+                        reason = 1 if name in auto_installs else 0
+                        
+                        p = Package(
+                            name=name,
+                            version=pkg_ver.split("-")[-1],
+                            desc=desc,
+                            isize=0,
+                            reason=reason,
+                            url=""
+                        )
+                        p.has_gui = False
+                        p.is_font = name.lower().startswith("font-") or "font" in name.lower()
+                        packages.append(p)
+        except Exception:
+            pass
+
+        return packages
+
+    def clean_cache(self, mode):
+        return ["sudo", "xbps-remove", "-O"]
+
+    def get_cache_size(self):
+        try:
+            res = subprocess.run(["du", "-sh", "/var/cache/xbps"], capture_output=True, text=True)
+            if res.returncode == 0:
+                return res.stdout.split()[0]
+        except Exception:
+            pass
+        return "Unknown"
+
+    def get_uninstall_cmd(self, packages):
+        return ["xbps-remove", "-R"] + packages
+
+
+class ApkBackend:
+    """Alpine Linux APK Backend - Parses apk database directly for fast results."""
+    def __init__(self):
+        self.db_path = "/lib/apk/db/installed"
+        self.world_path = "/etc/apk/world"
+        if not os.path.exists(self.db_path):
+            raise PackageManagerError("APK installed database not found at /lib/apk/db/installed")
+
+    def get_installed_packages(self):
+        manual = set()
+        if os.path.exists(self.world_path):
+            try:
+                with open(self.world_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        clean = re.split(r'[<>=]', line)[0].strip()
+                        if clean:
+                            manual.add(clean)
+            except Exception:
+                pass
+
+        packages = []
+        try:
+            with open(self.db_path, 'r', errors='ignore') as f:
+                content = f.read()
+        except Exception as e:
+            raise PackageManagerError(f"Failed to read apk database: {e}")
+
+        blocks = content.split("\n\n")
+        for block in blocks:
+            if not block.strip():
+                continue
+            
+            pkg_data = {}
+            for line in block.splitlines():
+                if len(line) > 2 and line[1] == ':':
+                    key = line[0]
+                    val = line[2:]
+                    pkg_data[key] = val
+
+            name = pkg_data.get('P')
+            if not name:
+                continue
+
+            version = pkg_data.get('V', '')
+            desc = pkg_data.get('T', '')
+            isize = int(pkg_data.get('I', 0))
+            url = pkg_data.get('U', '')
+            license_str = pkg_data.get('L', '')
+            licenses = [l.strip() for l in license_str.split(",") if l.strip()]
+
+            reason = 0 if name in manual else 1
+
+            depends = []
+            dep_str = pkg_data.get('D', '')
+            if dep_str:
+                for dep in dep_str.split():
+                    if not dep.startswith("so:") and not dep.startswith("cmd:"):
+                        clean_dep = re.split(r'[<>=]', dep)[0].strip()
+                        if clean_dep:
+                            depends.append(clean_dep)
+
+            provides = []
+            prov_str = pkg_data.get('p', '')
+            if prov_str:
+                for prov in prov_str.split():
+                    clean_prov = re.split(r'[<>=]', prov)[0].strip()
+                    if clean_prov:
+                        provides.append(clean_prov)
+
+            name_lower = name.lower()
+            is_font = name_lower.startswith("font-") or "font" in name_lower
+            has_gui = False
+
+            p = Package(
+                name=name,
+                version=version,
+                desc=desc,
+                isize=isize,
+                reason=reason,
+                url=url,
+                licenses=licenses,
+                depends=depends,
+                provides=provides,
+                installdate=0
+            )
+            p.has_gui = has_gui
+            p.is_font = is_font
+            packages.append(p)
+
+        return packages
+
+    def clean_cache(self, mode):
+        return ["sudo", "apk", "cache", "clean"]
+
+    def get_cache_size(self):
+        try:
+            res = subprocess.run(["du", "-sh", "/var/cache/apk"], capture_output=True, text=True)
+            if res.returncode == 0:
+                return res.stdout.split()[0]
+        except Exception:
+            pass
+        return "Unknown"
+
+    def get_uninstall_cmd(self, packages):
+        return ["apk", "del"] + packages
+
+
+class GentooBackend:
+    """Gentoo Linux Portage Backend - Parses local portage files under /var/db/pkg."""
+    def __init__(self):
+        self.db_path = "/var/db/pkg"
+        self.world_path = "/var/lib/portage/world"
+        if not os.path.exists(self.db_path):
+            raise PackageManagerError("Gentoo package DB directory not found at /var/db/pkg")
+
+    def get_installed_packages(self):
+        manual = set()
+        if os.path.exists(self.world_path):
+            try:
+                with open(self.world_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        clean = line.split('/')[-1].split(':')[0].strip()
+                        if clean:
+                            manual.add(clean)
+            except Exception:
+                pass
+
+        packages = []
+        try:
+            categories = os.listdir(self.db_path)
+        except Exception as e:
+            raise PackageManagerError(f"Failed to read Gentoo DB: {e}")
+
+        for cat in categories:
+            cat_path = os.path.join(self.db_path, cat)
+            if not os.path.isdir(cat_path):
+                continue
+            try:
+                pkgs = os.listdir(cat_path)
+            except Exception:
+                continue
+
+            for pkg_folder in pkgs:
+                pkg_path = os.path.join(cat_path, pkg_folder)
+                if not os.path.isdir(pkg_path):
+                    continue
+                  
+                match = re.match(r'^([a-zA-Z0-9\-_+]+)-([0-9].*)$', pkg_folder)
+                if not match:
+                    continue
+                name, version = match.groups()
+
+                desc = self._read_meta_file(pkg_path, "DESCRIPTION")
+                url = self._read_meta_file(pkg_path, "HOMEPAGE")
+                license_str = self._read_meta_file(pkg_path, "LICENSE")
+                licenses = [l.strip() for l in license_str.split() if l.strip()]
+                  
+                size_str = self._read_meta_file(pkg_path, "SIZE")
+                isize = 0
+                if size_str:
+                    try:
+                        isize = int(size_str)
+                    except ValueError:
+                        pass
+
+                reason = 0 if name in manual or f"{cat}/{name}" in manual else 1
+
+                depends = []
+                dep_str = self._read_meta_file(pkg_path, "DEPEND")
+                if dep_str:
+                    for dep in dep_str.split():
+                        clean_dep = re.sub(r'^[<>=!~]+', '', dep)
+                        parts = clean_dep.split('/')
+                        dep_pkg = parts[-1]
+                        dep_pkg_clean = re.sub(r'-[0-9].*$', '', dep_pkg)
+                        if dep_pkg_clean and not dep_pkg_clean.startswith("("):
+                            depends.append(dep_pkg_clean)
+
+                provides = []
+                prov_str = self._read_meta_file(pkg_path, "PROVIDE")
+                if prov_str:
+                    provides = [p.strip() for p in prov_str.split() if p.strip()]
+
+                has_gui = False
+                contents_path = os.path.join(pkg_path, "CONTENTS")
+                if os.path.exists(contents_path):
+                    try:
+                        with open(contents_path, 'r', errors='ignore') as cf:
+                            for line in cf:
+                                if "usr/share/applications/" in line and line.strip().endswith(".desktop"):
+                                    has_gui = True
+                                    break
+                    except Exception:
+                        pass
+
+                name_lower = name.lower()
+                is_font = name_lower.startswith("font-") or "font" in name_lower
+
+                p = Package(
+                    name=name,
+                    version=version,
+                    desc=desc,
+                    isize=isize,
+                    reason=reason,
+                    url=url,
+                    licenses=licenses,
+                    depends=depends,
+                    provides=provides,
+                    installdate=0
+                )
+                p.has_gui = has_gui
+                p.is_font = is_font
+                packages.append(p)
+
+        return packages
+
+    def _read_meta_file(self, pkg_path, filename):
+        fp = os.path.join(pkg_path, filename)
+        if os.path.exists(fp):
+            try:
+                with open(fp, 'r', errors='ignore') as f:
+                    return f.read().strip()
+            except Exception:
+                pass
+        return ""
+
+    def clean_cache(self, mode):
+        if shutil.which("eclean"):
+            return ["sudo", "eclean", "distfiles"]
+        return None
+
+    def get_cache_size(self):
+        try:
+            res = subprocess.run(["du", "-sh", "/var/cache/distfiles"], capture_output=True, text=True)
+            if res.returncode == 0:
+                return res.stdout.split()[0]
+        except Exception:
+            pass
+        return "Unknown"
+
+    def get_uninstall_cmd(self, packages):
+        return ["emerge", "--depclean"] + packages
+
+
+class NixBackend:
+    """NixOS / Nix Package Manager Backend - Supports generations and GC cleanup."""
+    def __init__(self):
+        if not shutil.which("nix-store") and not shutil.which("nix-env"):
+            raise PackageManagerError("Nix commands not found in PATH")
+
+    def get_installed_packages(self):
+        packages = []
+        try:
+            res = subprocess.run(["nix-env", "-q", "--json"], capture_output=True, text=True)
+            if res.returncode == 0:
+                data = json.loads(res.stdout)
+                for name, info in data.items():
+                    ver = info.get("version", "") if isinstance(info, dict) else ""
+                    p = Package(
+                        name=name,
+                        version=ver,
+                        desc="Nix user profile package",
+                        isize=0,
+                        reason=0,
+                        url=""
+                    )
+                    p.has_gui = False
+                    p.is_font = False
+                    packages.append(p)
+        except Exception:
+            pass
+        return packages
+
+    def clean_cache(self, mode):
+        # nix-collect-garbage deletes old generations and runs garbage collection
+        if str(mode) == "2" or str(mode) == "4":
+            return ["nix-collect-garbage", "-d"]
+        return ["nix-collect-garbage"]
+
+    def get_cache_size(self):
+        try:
+            res = subprocess.run(["du", "-sh", "/nix/store"], capture_output=True, text=True)
+            if res.returncode == 0:
+                return res.stdout.split()[0]
+        except Exception:
+            pass
+        return "Unknown"
+
+    def get_uninstall_cmd(self, packages):
+        return ["nix-env", "-e"] + packages
+
 # =====================================================================
 # SYSTEM CLEANER CORE
 # =====================================================================
@@ -503,6 +912,14 @@ class InraEngine:
             return PacmanBackend()
         elif os.path.exists("/var/lib/dpkg/status"):
             return AptBackend()
+        elif os.path.exists("/var/db/xbps/pkgdb-0.3.plist") or shutil.which("xbps-query"):
+            return XbpsBackend()
+        elif os.path.exists("/lib/apk/db/installed"):
+            return ApkBackend()
+        elif os.path.exists("/var/db/pkg") and os.path.exists("/var/lib/portage/world"):
+            return GentooBackend()
+        elif shutil.which("nix-store") is not None:
+            return NixBackend()
         elif shutil.which("rpm") is not None:
             return RpmBackend()
         else:
@@ -515,6 +932,14 @@ class InraEngine:
             return "APT (Debian/Ubuntu)"
         elif isinstance(self.backend, RpmBackend):
             return "RPM/DNF (Fedora/RHEL)"
+        elif isinstance(self.backend, XbpsBackend):
+            return "XBPS (Void Linux)"
+        elif isinstance(self.backend, ApkBackend):
+            return "APK (Alpine Linux)"
+        elif isinstance(self.backend, GentooBackend):
+            return "Portage (Gentoo Linux)"
+        elif isinstance(self.backend, NixBackend):
+            return "Nix (NixOS)"
         return "Unknown"
 
     def _parse_dep_name(self, dep_spec):
@@ -529,11 +954,9 @@ class InraEngine:
         self.optional_required_by = {}
         self.provisions_map = {}
         
-        # Load packages
         packages = self.backend.get_installed_packages()
         self.pkg_dict = {p.name: p for p in packages}
 
-        # Build provisions map
         for p in packages:
             self.provisions_map[p.name] = {p.name}
             for prov in p.provides:
@@ -542,13 +965,11 @@ class InraEngine:
                     self.provisions_map[prov_name] = set()
                 self.provisions_map[prov_name].add(p.name)
 
-        # Build dependency graphs
         for p in packages:
             self.required_by[p.name] = set()
             self.optional_required_by[p.name] = set()
 
         for p in packages:
-            # Standard dependencies
             for dep_spec in p.depends:
                 dep_name = self._parse_dep_name(dep_spec)
                 providers = self.provisions_map.get(dep_name, set())
@@ -556,7 +977,6 @@ class InraEngine:
                     if prov in self.pkg_dict and prov != p.name:
                         self.required_by[prov].add(p.name)
 
-            # Optional dependencies
             for dep_spec in p.optdepends:
                 dep_name = self._parse_dep_name(dep_spec)
                 providers = self.provisions_map.get(dep_name, set())
@@ -564,7 +984,6 @@ class InraEngine:
                     if prov in self.pkg_dict and prov != p.name:
                         self.optional_required_by[prov].add(p.name)
 
-        # Load user ignore list
         custom_ignore = set()
         if self.ignore_file_path and os.path.exists(self.ignore_file_path):
             try:
@@ -576,15 +995,13 @@ class InraEngine:
             except Exception as e:
                 print(f"Warning: Could not read ignore file: {e}")
 
-        # Distro specific system-critical seeds
         seeds = {
             'sudo', 'bash', 'sh', 'coreutils', 'util-linux', 'systemd', 'networkmanager', 
             'openssh', 'grub', 'base', 'base-devel', 'apt', 'dpkg', 'rpm', 'dnf', 'setup',
-            'filesystem', 'basesystem', 'kernel'
+            'filesystem', 'basesystem', 'kernel', 'nix', 'xbps', 'apk-tools'
         }
         seeds.update(custom_ignore)
 
-        # Protect kernel packages automatically
         for p in packages:
             name = p.name
             if name.startswith('linux') and not name.endswith('-headers') and not name.endswith('-docs'):
@@ -592,7 +1009,6 @@ class InraEngine:
             elif name.startswith('kernel') and not name.endswith('-headers') and not name.endswith('-devel'):
                 seeds.add(name)
 
-        # Traverse and find all packages that are critical or depended upon by critical packages
         self.critical = set()
         queue = list(seeds.intersection(self.pkg_dict.keys()))
         self.critical.update(queue)
@@ -608,7 +1024,6 @@ class InraEngine:
                         self.critical.add(prov)
                         queue.append(prov)
 
-        # Categorize
         categories = {
             'strict_orphans': [],
             'optional_orphans': [],
@@ -627,20 +1042,17 @@ class InraEngine:
             if p.name in self.critical:
                 continue
 
-            # Check if strictly required by anything
-            # If required by another package, we can't remove it directly safely unless we remove that package too.
-            # Thus, we only propose packages that have no other installed package depending on them.
             if len(self.required_by[p.name]) > 0:
                 continue
 
             opt_for = self.optional_required_by[p.name]
 
-            if p.reason == 1:  # Dependency (Orphan)
+            if p.reason == 1:
                 if len(opt_for) == 0:
                     categories['strict_orphans'].append(p)
                 else:
                     categories['optional_orphans'].append(p)
-            else:  # Explicitly installed
+            else:
                 is_dev = bool(dev_keywords.search(p.desc)) or p.name.endswith('-headers') or p.name.endswith('-devel') or p.name.endswith('-dev')
                 is_font_theme = p.is_font or p.name.endswith('-theme') or p.name.endswith('-icon-theme') or 'theme' in p.name.lower()
 
@@ -656,7 +1068,6 @@ class InraEngine:
         return categories
 
     def get_recursive_removals(self, pkg_name):
-        """Calculates what packages would also be removed recursively (orphans cascade)."""
         removed = {pkg_name}
         q = [pkg_name]
         while q:
@@ -670,10 +1081,8 @@ class InraEngine:
                 for prov in providers:
                     if prov not in self.pkg_dict or prov in removed:
                         continue
-                    # Check if it was installed as a dependency
                     dep_pkg = self.pkg_dict[prov]
                     if dep_pkg.reason == 1:
-                        # Check if all packages that require it are already in our removed set
                         requirers = self.required_by[prov]
                         if requirers.issubset(removed):
                             removed.add(prov)
@@ -759,7 +1168,6 @@ def get_journal_size():
 # =====================================================================
 
 def getch():
-    """Reads a single keypress from standard input without Enter."""
     import sys
     import tty
     import termios
@@ -767,12 +1175,11 @@ def getch():
     try:
         old_settings = termios.tcgetattr(fd)
     except termios.error:
-        # Fallback to standard input if not in a proper terminal (like tests)
         return sys.stdin.read(1)
     try:
         tty.setraw(sys.stdin.fileno())
         ch = sys.stdin.read(1)
-        if ch == '\x1b': # Escape sequences (arrow keys, etc.)
+        if ch == '\x1b':
             ch2 = sys.stdin.read(1)
             if ch2 == '[':
                 ch3 = sys.stdin.read(1)
@@ -835,7 +1242,6 @@ def show_package_details(pkg, engine):
             if n != pkg.name and n in engine.pkg_dict:
                 print(f"  - {n} ({format_size(engine.pkg_dict[n].isize)})")
                 
-        # Show what packages originally optional-depended on it
         opt_for = engine.optional_required_by.get(pkg.name, set())
         if opt_for:
             print(f"\n{color_text('Optional dependency for:', BOLD)}")
@@ -852,16 +1258,14 @@ def category_menu(cat_key, cat_label, pkgs, selections, engine):
     page_size = 15
     cursor_idx = 0
     search_query = ""
-    sort_mode = "rec_size" # "rec_size", "size", "name", "date"
+    sort_mode = "rec_size"
 
     while True:
-        # Filter packages
         filtered_pkgs = pkgs_sorted
         if search_query:
             q = search_query.lower()
             filtered_pkgs = [p for p in pkgs_sorted if q in p.name.lower() or q in p.desc.lower()]
 
-        # Apply Sort
         if sort_mode == "rec_size":
             filtered_pkgs = sorted(filtered_pkgs, key=lambda p: engine.get_recursive_size_cached(p.name), reverse=True)
         elif sort_mode == "size":
@@ -888,7 +1292,6 @@ def category_menu(cat_key, cat_label, pkgs, selections, engine):
         start_idx = page * page_size
         end_idx = min(start_idx + page_size, len(filtered_pkgs))
         
-        # Adjust cursor range
         if cursor_idx >= len(filtered_pkgs):
             cursor_idx = max(0, len(filtered_pkgs) - 1)
         
@@ -917,7 +1320,6 @@ def category_menu(cat_key, cat_label, pkgs, selections, engine):
         print(f"Page {page+1} of {total_pages} | Packages {start_idx+1}-{end_idx} of {len(filtered_pkgs)}")
         print("-" * 80)
         
-        # Single-key input processing
         key = getch()
         if not key:
             continue
@@ -938,15 +1340,12 @@ def category_menu(cat_key, cat_label, pkgs, selections, engine):
             if filtered_pkgs:
                 show_package_details(filtered_pkgs[cursor_idx], engine)
         elif key == '/':
-            # Search
             sys.stdout.write("\rSearch (Esc to cancel): ")
             sys.stdout.flush()
-            # Restore normal terminal rules for text typing
             import termios
             fd = sys.stdin.fileno()
             old = termios.tcgetattr(fd)
             try:
-                # We want standard input here to type a string
                 q = input().strip()
                 search_query = q
                 cursor_idx = 0
@@ -956,7 +1355,6 @@ def category_menu(cat_key, cat_label, pkgs, selections, engine):
             finally:
                 termios.tcsetattr(fd, termios.TCSADRAIN, old)
         elif key.lower() == 's':
-            # Cycle sorts
             sorts = ["rec_size", "size", "name", "date"]
             curr_sort_idx = sorts.index(sort_mode)
             sort_mode = sorts[(curr_sort_idx + 1) % len(sorts)]
@@ -1075,7 +1473,6 @@ def run_cleanup_flow(selections, categories, engine):
         print(f"\nRunning command: {' '.join(cmd_list)}")
         try:
             subprocess.run(cmd_list, check=True)
-            # Clear selections
             for name in all_removed:
                 if name in selections:
                     selections[name] = False
@@ -1083,7 +1480,6 @@ def run_cleanup_flow(selections, categories, engine):
             print("Reloading database...")
             time.sleep(2)
             
-            # Reload
             new_cats = engine.load_system_state()
             categories.clear()
             categories.update(new_cats)
@@ -1132,7 +1528,6 @@ def interactive_loop(categories, engine):
         
         print("-" * 55)
         
-        # Selected overview
         selected_pkgs = [p for cat in categories.values() for p in cat if selections.get(p.name, False)]
         if selected_pkgs:
             all_removed = engine.get_recursive_removals_multi([p.name for p in selected_pkgs])
@@ -1149,7 +1544,6 @@ def interactive_loop(categories, engine):
             break
         elif choice == 'R':
             run_cleanup_flow(selections, categories, engine)
-            # Reload screen
         elif choice in ['1', '2', '3', '4', '5', '6']:
             key = keys[int(choice) - 1]
             category_menu(key, labels[key], categories[key], selections, engine)
@@ -1189,7 +1583,6 @@ def run_dry_run_report(categories, min_size, engine):
         print(f"\n{labels[key]} ({len(filtered_pkgs)} packages):")
         print("-" * 50)
         
-        # Sort by recursive size
         for p in sorted(filtered_pkgs, key=lambda x: engine.get_recursive_size_cached(x.name), reverse=True):
             rec_size = engine.get_recursive_size_cached(p.name)
             grand_total_packages += 1
@@ -2002,7 +2395,6 @@ HTML_CONTENT = """<!DOCTYPE html>
         let cacheSize = 'Unknown';
         let journalSize = 'Unknown';
 
-        // Initialize
         window.onload = async function() {
             await refreshData();
             switchCategory('strict_orphans', document.querySelector('.nav-item'));
@@ -2017,7 +2409,6 @@ HTML_CONTENT = """<!DOCTYPE html>
                 cacheSize = data.cache_size;
                 journalSize = data.journal_size;
 
-                // Update general UI stats
                 document.getElementById('stat-pm').innerText = pmBackend;
                 document.getElementById('utils-cache-size').innerText = cacheSize;
                 document.getElementById('utils-journal-size').innerText = journalSize;
@@ -2025,7 +2416,6 @@ HTML_CONTENT = """<!DOCTYPE html>
                 let totalCount = 0;
                 let totalBytes = 0;
 
-                // Update category badges & totals
                 for (const cat in categoriesData) {
                     const count = categoriesData[cat].length;
                     const badge = document.getElementById(`badge-${cat}`);
@@ -2039,7 +2429,6 @@ HTML_CONTENT = """<!DOCTYPE html>
                 document.getElementById('stat-count').innerText = totalCount;
                 document.getElementById('stat-size').innerText = formatSize(totalBytes);
 
-                // Update cleanups count and visibility
                 updateActionBar();
             } catch (e) {
                 console.error("Failed to load status:", e);
@@ -2049,7 +2438,6 @@ HTML_CONTENT = """<!DOCTYPE html>
         function switchCategory(cat, element) {
             currentCategory = cat;
             
-            // Manage active class
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             if (element) element.classList.add('active');
 
@@ -2062,7 +2450,6 @@ HTML_CONTENT = """<!DOCTYPE html>
             document.getElementById('packages-panel-view').style.display = 'flex';
             document.getElementById('utilities-panel-view').style.display = 'none';
 
-            // Change title
             const titles = {
                 'strict_orphans': "Orphan Packages (Strict)",
                 'optional_orphans': "Orphan Packages (Optional)",
@@ -2072,8 +2459,6 @@ HTML_CONTENT = """<!DOCTYPE html>
                 'explicit_cli_other': "Unused Explicit CLI & Others"
             };
             document.getElementById('current-cat-title').innerText = titles[cat] || "Packages";
-
-            // Reset inputs
             document.getElementById('search-input').value = '';
             
             renderPackageTable();
@@ -2088,12 +2473,10 @@ HTML_CONTENT = """<!DOCTYPE html>
 
             let pkgs = categoriesData[currentCategory] || [];
 
-            // Filter search
             if (searchVal) {
                 pkgs = pkgs.filter(p => p.name.toLowerCase().includes(searchVal) || p.description.toLowerCase().includes(searchVal));
             }
 
-            // Sort
             if (sortBy === 'rec_size') {
                 pkgs.sort((a, b) => b.recursive_size - a.recursive_size);
             } else if (sortBy === 'size') {
@@ -2149,7 +2532,6 @@ HTML_CONTENT = """<!DOCTYPE html>
                 }
             });
 
-            // Re-render table checkboxes
             const checkboxes = document.querySelectorAll('.pkg-checkbox');
             checkboxes.forEach(cb => {
                 const rowName = cb.closest('tr').querySelector('.pkg-name').innerText;
@@ -2170,16 +2552,10 @@ HTML_CONTENT = """<!DOCTYPE html>
                 return;
             }
 
-            // Calculate total recursive size
-            let totalBytes = 0;
-            let countTotal = keys.length;
-
-            // Loop over all categories to accumulate size of selected packages
             let visited = new Set();
             for (const cat in categoriesData) {
                 categoriesData[cat].forEach(p => {
                     if (selectedPackages[p.name]) {
-                        // Gather recursive packages
                         if (p.recursive_packages) {
                             p.recursive_packages.forEach(rp => visited.add(rp));
                         }
@@ -2188,7 +2564,6 @@ HTML_CONTENT = """<!DOCTYPE html>
                 });
             }
 
-            // Calculate exact space reclaimed by fetching sizes from data
             let allPkgsMap = {};
             for (const cat in categoriesData) {
                 categoriesData[cat].forEach(p => {
@@ -2198,13 +2573,12 @@ HTML_CONTENT = """<!DOCTYPE html>
 
             let recursiveReclaimBytes = 0;
             visited.forEach(name => {
-                // If package details are known, add its size
                 if (allPkgsMap[name]) {
                     recursiveReclaimBytes += allPkgsMap[name].installed_size;
                 }
             });
 
-            countSpan.innerText = countTotal;
+            countSpan.innerText = keys.length;
             spaceSpan.innerText = formatSize(recursiveReclaimBytes);
             bar.classList.add('visible');
         }
@@ -2277,7 +2651,6 @@ HTML_CONTENT = """<!DOCTYPE html>
             const keys = Object.keys(selectedPackages);
             const container = document.getElementById('cleanup-review-stats');
             
-            // Recalculate sizes
             let visited = new Set();
             let allPkgsMap = {};
             for (const cat in categoriesData) {
@@ -2303,7 +2676,6 @@ HTML_CONTENT = """<!DOCTYPE html>
                 <div style="margin: 10px 0; font-size:1.15rem;">Total disk space to free: <span class="glow-green" style="font-weight:700;">${formatSize(reclaimBytes)}</span></div>
             `;
 
-            // Reset console
             document.getElementById('cleanup-console').style.display = 'none';
             document.getElementById('cleanup-console').innerText = '';
             document.getElementById('btn-confirm-cleanup').style.display = 'block';
@@ -2394,7 +2766,6 @@ def get_api_status():
     global engine_instance
     categories = engine_instance.load_system_state()
     
-    # Structure categories
     cat_structure = {}
     for cat, pkgs in categories.items():
         cat_structure[cat] = []
@@ -2420,7 +2791,6 @@ def get_api_status():
 
 class InraHTTPHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        # Suppress standard logging to keep stdout clean
         pass
 
     def do_GET(self):
@@ -2468,8 +2838,6 @@ class InraHTTPHandler(BaseHTTPRequestHandler):
                 return
                 
             raw_cmd = engine_instance.backend.get_uninstall_cmd(packages)
-            # Try pkexec for graphical polkit agent authentication, otherwise fallback to sudo -n or sudo
-            # pkexec runs graphical authorization dialog if run from desktop context
             cmd = ["pkexec"] + raw_cmd if shutil.which("pkexec") else ["sudo"] + raw_cmd
             
             try:
@@ -2488,7 +2856,6 @@ class InraHTTPHandler(BaseHTTPRequestHandler):
             if not cmd:
                 self.wfile.write(json.dumps({"success": False, "message": "Action not supported by package manager."}).encode("utf-8"))
                 return
-            # Use pkexec if available
             run_cmd = ["pkexec"] + cmd[1:] if shutil.which("pkexec") else cmd
             try:
                 res = subprocess.run(run_cmd, capture_output=True, text=True)
@@ -2525,8 +2892,6 @@ def start_gui_server(port):
     server = HTTPServer(('127.0.0.1', port), InraHTTPHandler)
     url = f"http://127.0.0.1:{port}"
     print(f"Starting local GUI Web server at {url} ...")
-    
-    # Open default browser
     threading.Thread(target=lambda: webbrowser.open(url)).start()
     
     try:
@@ -2557,14 +2922,12 @@ def main():
     if args.no_color or os.environ.get('NO_COLOR'):
         NO_COLOR = True
         
-    # Setup ignore file path
     ignore_file_path = args.ignore_file
     if not ignore_file_path:
         home_config = os.path.expanduser('~/.config')
         ignore_dir = os.path.join(home_config, 'inra')
         ignore_file_path = os.path.join(ignore_dir, 'ignore.conf')
         
-        # Create directory and default config file if they don't exist
         if not os.path.exists(ignore_dir):
             try:
                 os.makedirs(ignore_dir)
@@ -2578,21 +2941,18 @@ def main():
             except Exception:
                 pass
                 
-    # Initialize Engine
     try:
         engine_instance = InraEngine(ignore_file_path)
     except PackageManagerError as e:
         print(color_text(f"Fatal Error: {e}", RED))
         sys.exit(1)
         
-    # Run Web GUI if requested
     if args.gui:
         print("Scanning system packages and computing critical dependency trees...")
         engine_instance.load_system_state()
         start_gui_server(args.port)
         return
 
-    # Non-interactive modes
     if args.json:
         engine_instance.load_system_state()
         run_json_output(engine_instance.pkg_dict, engine_instance)
@@ -2609,7 +2969,6 @@ def main():
         run_dry_run_report(categories, min_size_bytes, engine_instance)
         return
         
-    # Interactive TUI Loop
     print("Scanning system packages and computing critical dependency trees...")
     categories = engine_instance.load_system_state()
     interactive_loop(categories, engine_instance)
