@@ -2,13 +2,13 @@
 
 INRA is a smart, safe, low-level system utility designed to analyze installed packages across different Linux distributions, identify candidates for cleaning, estimate reclaimable space, and safely purge unused packages.
 
-INRA currently supports **Arch Linux** (Pacman), **Debian/Ubuntu** (APT/DPKG), and **Fedora/RHEL** (RPM/DNF) with zero external python library dependencies.
+INRA currently supports **Arch Linux** (Pacman), **Debian/Ubuntu** (APT/DPKG), **Fedora/RHEL** (RPM/DNF), **Void Linux** (XBPS), **Alpine Linux** (APK), **Gentoo Linux** (Portage), and **NixOS** (Nix) with zero external python library dependencies.
 
 ![Logo](inra.png)
 
 ## Key Features
 
-1. **Distro-Wide Support**: Automatically detects package manager (Pacman, APT, RPM/DNF) and adapts its queries and commands.
+1. **Distro-Wide Support**: Automatically detects package manager (Pacman, APT, RPM/DNF, XBPS, APK, Portage, Nix) and adapts its queries and commands.
 2. **Interactive TUI**:
    - Keyboard-driven navigation (arrow keys, spacebar, etc.).
    - Live category search (press `/` key to filter list).
