@@ -22,7 +22,7 @@ cp inra build/inra-${VERSION}/
 cp README.md build/inra-${VERSION}/
 cp LICENSE build/inra-${VERSION}/
 cp inra.desktop build/inra-${VERSION}/
-cp inra.png build/inra-${VERSION}/
+cp inra.jpg build/inra-${VERSION}/
 tar -czf dist/inra-${VERSION}.tar.gz -C build inra-${VERSION}
 echo "Created: dist/inra-${VERSION}.tar.gz"
 
@@ -49,7 +49,7 @@ EOF
 cp inra ${DEB_DIR}/usr/bin/
 chmod +x ${DEB_DIR}/usr/bin/inra
 cp inra.desktop ${DEB_DIR}/usr/share/applications/
-cp inra.png ${DEB_DIR}/usr/share/pixmaps/inra.png
+cp inra.jpg ${DEB_DIR}/usr/share/pixmaps/inra.jpg
 
 # Build debian package
 dpkg-deb --build ${DEB_DIR} dist/inra-${VERSION}_all.deb
@@ -79,7 +79,7 @@ mkdir -p ${APPDIR}/usr/share/pixmaps
 cp inra ${APPDIR}/usr/bin/inra
 chmod +x ${APPDIR}/usr/bin/inra
 cp inra.desktop ${APPDIR}/
-cp inra.png ${APPDIR}/
+cp inra.jpg ${APPDIR}/
 
 # Create AppRun launcher
 cat <<EOF > ${APPDIR}/AppRun

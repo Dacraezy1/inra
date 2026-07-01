@@ -4,7 +4,7 @@ INRA is a smart, safe, low-level system utility designed to analyze installed pa
 
 INRA currently supports **Arch Linux** (Pacman), **Debian/Ubuntu** (APT/DPKG), **Fedora/RHEL** (RPM/DNF), **Void Linux** (XBPS), **Alpine Linux** (APK), **Gentoo Linux** (Portage), and **NixOS** (Nix) with zero external python library dependencies.
 
-![Logo](inra.png)
+![Logo](inra.jpg)
 
 ## Key Features
 
