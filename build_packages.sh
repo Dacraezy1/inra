@@ -93,7 +93,7 @@ chmod +x ${APPDIR}/AppRun
 # Download appimagetool if not present
 if [ ! -f "appimagetool" ]; then
     echo "Downloading appimagetool..."
-    curl -Lo appimagetool https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage
+    curl -Lo appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
     chmod +x appimagetool
 fi
 

@@ -2396,18 +2396,33 @@ HTML_CONTENT = """<!DOCTYPE html>
         let journalSize = 'Unknown';
 
         window.onload = async function() {
-            await refreshData();
-            switchCategory('strict_orphans', document.querySelector('.nav-item'));
+            try {
+                await refreshData();
+            } catch (err) {
+                console.error("Initialization error:", err);
+            }
+            try {
+                switchCategory('strict_orphans', document.querySelector('.nav-item'));
+            } catch (err) {
+                console.error("Navigation error:", err);
+            }
         }
 
         async function refreshData() {
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
-                categoriesData = data.categories;
-                pmBackend = data.package_manager;
-                cacheSize = data.cache_size;
-                journalSize = data.journal_size;
+                
+                if (data.error) {
+                    console.error("Backend Error:", data.error);
+                    document.getElementById('stat-pm').innerText = "Error: " + data.error;
+                    return;
+                }
+
+                categoriesData = data.categories || {};
+                pmBackend = data.package_manager || "Unknown";
+                cacheSize = data.cache_size || "Unknown";
+                journalSize = data.journal_size || "Unknown";
 
                 document.getElementById('stat-pm').innerText = pmBackend;
                 document.getElementById('utils-cache-size').innerText = cacheSize;
@@ -2417,13 +2432,14 @@ HTML_CONTENT = """<!DOCTYPE html>
                 let totalBytes = 0;
 
                 for (const cat in categoriesData) {
+                    if (!categoriesData[cat]) continue;
                     const count = categoriesData[cat].length;
                     const badge = document.getElementById(`badge-${cat}`);
                     if (badge) badge.innerText = count;
 
                     totalCount += count;
                     categoriesData[cat].forEach(p => {
-                        totalBytes += p.installed_size;
+                        totalBytes += (p.installed_size || 0);
                     });
                 }
                 document.getElementById('stat-count').innerText = totalCount;
@@ -2432,6 +2448,7 @@ HTML_CONTENT = """<!DOCTYPE html>
                 updateActionBar();
             } catch (e) {
                 console.error("Failed to load status:", e);
+                document.getElementById('stat-pm').innerText = "Connection Failed: " + e.message;
             }
         }
 
@@ -2474,7 +2491,7 @@ HTML_CONTENT = """<!DOCTYPE html>
             let pkgs = categoriesData[currentCategory] || [];
 
             if (searchVal) {
-                pkgs = pkgs.filter(p => p.name.toLowerCase().includes(searchVal) || p.description.toLowerCase().includes(searchVal));
+                pkgs = pkgs.filter(p => p.name.toLowerCase().includes(searchVal) || (p.description || '').toLowerCase().includes(searchVal));
             }
 
             if (sortBy === 'rec_size') {
