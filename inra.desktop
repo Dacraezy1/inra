@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=Inra System Cleaner
 Comment=Smart, Universal Linux Package Purger and System Cleaner
-Exec=inra --gui
+Exec=inra-gui
 Icon=inra
 Terminal=false
 Type=Application

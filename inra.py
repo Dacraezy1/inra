@@ -2933,6 +2933,9 @@ def main():
     parser.add_argument('--ignore-file', help="Path to custom ignore config file (default: ~/.config/inra/ignore.conf)")
     parser.add_argument('--gui', action='store_true', help="Start beautiful local Web GUI browser application")
     parser.add_argument('-p', '--port', type=int, default=17890, help="Port to run local GUI server on (default: 17890)")
+    parser.add_argument('--purge', nargs='+', help="Purge the specified packages and their recursive orphans")
+    parser.add_argument('--clean-cache', choices=['1', '2'], help="Clean package cache (1=uninstalled only, 2=all)")
+    parser.add_argument('--vacuum-journal', choices=['1', '2', '3', '4'], help="Vacuum systemd journal (1=2d, 2=7d, 3=100M, 4=500M)")
     
     args = parser.parse_args()
     
@@ -2964,6 +2967,37 @@ def main():
         print(color_text(f"Fatal Error: {e}", RED))
         sys.exit(1)
         
+    if args.purge:
+        engine_instance.load_system_state()
+        raw_cmd = engine_instance.backend.get_uninstall_cmd(args.purge)
+        print(f"Executing uninstall command: {' '.join(raw_cmd)}")
+        res = subprocess.run(raw_cmd)
+        sys.exit(res.returncode)
+
+    if args.clean_cache:
+        cmd = engine_instance.backend.clean_cache(args.clean_cache)
+        if not cmd:
+            print("Action not supported by package manager.")
+            sys.exit(1)
+        print(f"Executing cache clean command: {' '.join(cmd)}")
+        res = subprocess.run(cmd)
+        sys.exit(res.returncode)
+
+    if args.vacuum_journal:
+        mode = args.vacuum_journal
+        sub_cmd = []
+        if mode == "1":
+            sub_cmd = ["journalctl", "--vacuum-time=2d"]
+        elif mode == "2":
+            sub_cmd = ["journalctl", "--vacuum-time=7d"]
+        elif mode == "3":
+            sub_cmd = ["journalctl", "--vacuum-size=100M"]
+        elif mode == "4":
+            sub_cmd = ["journalctl", "--vacuum-size=500M"]
+        print(f"Executing journal vacuum command: {' '.join(sub_cmd)}")
+        res = subprocess.run(sub_cmd)
+        sys.exit(res.returncode)
+
     if args.gui:
         print("Scanning system packages and computing critical dependency trees...")
         engine_instance.load_system_state()
@@ -2971,8 +3005,8 @@ def main():
         return
 
     if args.json:
-        engine_instance.load_system_state()
-        run_json_output(engine_instance.pkg_dict, engine_instance)
+        categories = engine_instance.load_system_state()
+        run_json_output(categories, engine_instance)
         return
         
     if args.dry_run:
