@@ -11,7 +11,7 @@
 #include <QRadioButton>
 #include <QScrollBar>
 #include <QDir>
-#include <QDebug>
+#include <QCoreApplication>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -445,27 +445,43 @@ void MainWindow::applyTheme() {
 }
 
 QString MainWindow::findInraBackend() {
-    // Try current workspace directory
+    QString appDir = QCoreApplication::applicationDirPath();
     QString curDir = QDir::currentPath();
+
+    // Check application dir
+    if (QFile::exists(appDir + "/inra.py")) {
+        return "python3 " + appDir + "/inra.py";
+    }
+    // Check application dir's parent (for development build inside gui/build/)
+    if (QFile::exists(appDir + "/../inra.py")) {
+        return "python3 " + appDir + "/../inra.py";
+    }
+    if (QFile::exists(appDir + "/../../inra.py")) {
+        return "python3 " + appDir + "/../../inra.py";
+    }
+
+    // Check current path
     if (QFile::exists(curDir + "/inra.py")) {
         return "python3 " + curDir + "/inra.py";
     }
-    
-    // Try parent directory
     if (QFile::exists(curDir + "/../inra.py")) {
         return "python3 " + curDir + "/../inra.py";
     }
 
-    // Try /usr/bin/inra.py or /usr/bin/inra
+    // System-wide checks
     if (QFile::exists("/usr/bin/inra.py")) {
         return "python3 /usr/bin/inra.py";
     }
     if (QFile::exists("/usr/bin/inra")) {
-        // Since /usr/bin/inra is python or symlink
         return "/usr/bin/inra";
     }
+    if (QFile::exists("/usr/local/bin/inra.py")) {
+        return "python3 /usr/local/bin/inra.py";
+    }
+    if (QFile::exists("/usr/local/bin/inra")) {
+        return "/usr/local/bin/inra";
+    }
 
-    // Default fallback
     return "inra";
 }
 
