@@ -51,6 +51,11 @@ cp inra.py ${DEB_DIR}/usr/bin/inra
 chmod +x ${DEB_DIR}/usr/bin/inra
 cp inra.desktop ${DEB_DIR}/usr/share/applications/
 cp inra.jpg ${DEB_DIR}/usr/share/pixmaps/inra.jpg
+if command -v convert &> /dev/null; then
+    convert inra.jpg ${DEB_DIR}/usr/share/pixmaps/inra.png
+else
+    cp inra.jpg ${DEB_DIR}/usr/share/pixmaps/inra.png
+fi
 
 # Build debian package
 dpkg-deb --build ${DEB_DIR} dist/inra-${VERSION}_all.deb
@@ -81,6 +86,11 @@ cp inra.py ${APPDIR}/usr/bin/inra
 chmod +x ${APPDIR}/usr/bin/inra
 cp inra.desktop ${APPDIR}/
 cp inra.jpg ${APPDIR}/
+if command -v convert &> /dev/null; then
+    convert inra.jpg ${APPDIR}/inra.png
+else
+    cp inra.jpg ${APPDIR}/inra.png
+fi
 
 # Create AppRun launcher
 cat <<EOF > ${APPDIR}/AppRun
