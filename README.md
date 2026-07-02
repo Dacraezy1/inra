@@ -4,7 +4,7 @@ INRA is a smart, safe, low-level system utility designed to analyze installed pa
 
 INRA currently supports **Arch Linux** (Pacman), **Debian/Ubuntu** (APT/DPKG), **Fedora/RHEL** (RPM/DNF), **Void Linux** (XBPS), **Alpine Linux** (APK), **Gentoo Linux** (Portage), and **NixOS** (Nix) with zero external python library dependencies.
 
-![Logo](inra.jpg)
+
 
 ## Key Features
 
@@ -14,11 +14,7 @@ INRA currently supports **Arch Linux** (Pacman), **Debian/Ubuntu** (APT/DPKG), *
    - Live category search (press `/` key to filter list).
    - Multi-column sort options (by individual size, recursive size, package name, install date).
    - Package inspector showing license, URL, and sub-dependencies.
-3. **Futuristic Native Qt6 GUI (`inra-gui`)**:
-   - Super-fast compiled desktop application styled with a premium dark cyber theme.
-   - Live search filters, checkable tables, and category filters.
-   - Single-click package purging with a real-time console log drawer.
-   - Native security integration running commands through standard `pkexec` dialog authorization.
+
 4. **True Dependency Resolution**: Detects strict and optional orphans (dependencies installed automatically but no longer required by any package).
 5. **Smart Heuristic Classification**: Organizes explicit packages into logical tabs:
    - **GUI Applications** (detects `.desktop` files owned by packages)
@@ -54,12 +50,7 @@ Launch the TUI interface in your terminal:
 - Press **B** to go back.
 - Press **R** to review and run the cleanup.
 
-#### Beautiful Native Qt6 GUI
-Launch the native desktop interface:
-```bash
-./inra-gui
-```
-*(Note: You can compile it locally in the `gui` folder using `cmake` and `make`)*
+
 
 #### Non-Interactive Dry Run
 Print recommendations directly to stdout:
@@ -108,7 +99,7 @@ To generate local packages, install `dpkg-dev`, `rpm`, and `alien`, then run:
 ./build_packages.sh <version>
 ```
 
-Packages are automatically compiled and published to GitHub Releases upon pushing tags matching `v*`.
+Packages are automatically generated and published to GitHub Releases upon pushing tags matching `v*`.
 
 ---
 

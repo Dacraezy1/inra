@@ -1,9 +1,9 @@
 [Desktop Entry]
-Name=Inra System Cleaner
+Name=Inra System Cleaner (TUI)
 Comment=Smart, Universal Linux Package Purger and System Cleaner
-Exec=inra-gui
+Exec=inra
 Icon=inra
-Terminal=false
+Terminal=true
 Type=Application
 Categories=System;Settings;Utility;
 Keywords=cleanup;clean;purge;orphan;pacman;apt;dnf;

@@ -23,7 +23,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y alien rpm dpkg-dev qt6-base-dev qt6-base-dev-tools cmake build-essential
+          sudo apt-get install -y alien rpm dpkg-dev
 
       - name: Run Build Packaging Script
         run: |
