@@ -2774,149 +2774,6 @@ HTML_CONTENT = """<!DOCTYPE html>
     </script>
 </body>
 </html>
-"""
-
-# API handlers
-engine_instance = None
-
-def get_api_status():
-    global engine_instance
-    categories = engine_instance.load_system_state()
-    
-    cat_structure = {}
-    for cat, pkgs in categories.items():
-        cat_structure[cat] = []
-        for p in pkgs:
-            removals = engine_instance.get_recursive_removals(p.name)
-            cat_structure[cat].append({
-                'name': p.name,
-                'version': p.version,
-                'description': p.desc,
-                'installed_size': p.isize,
-                'recursive_size': sum(engine_instance.pkg_dict[name].isize for name in removals if name in engine_instance.pkg_dict),
-                'recursive_packages': list(removals),
-                'install_date': p.installdate,
-                'url': p.url
-            })
-            
-    return {
-        'package_manager': engine_instance.get_package_manager_name(),
-        'cache_size': engine_instance.backend.get_cache_size(),
-        'journal_size': get_journal_size(),
-        'categories': cat_structure
-    }
-
-class InraHTTPHandler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
-        pass
-
-    def do_GET(self):
-        parsed_url = urllib.parse.urlparse(self.path)
-        path = parsed_url.path
-        
-        if path == "/":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(HTML_CONTENT.encode("utf-8"))
-        elif path == "/api/status":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            try:
-                status_data = get_api_status()
-                self.wfile.write(json.dumps(status_data).encode("utf-8"))
-            except Exception as e:
-                self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
-        else:
-            self.send_error(404, "Not Found")
-
-    def do_POST(self):
-        parsed_url = urllib.parse.urlparse(self.path)
-        path = parsed_url.path
-        
-        content_length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else ""
-        data = {}
-        if body:
-            try:
-                data = json.loads(body)
-            except Exception:
-                pass
-                
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        
-        if path == "/api/cleanup":
-            packages = data.get("packages", [])
-            if not packages:
-                self.wfile.write(json.dumps({"success": False, "message": "No packages selected."}).encode("utf-8"))
-                return
-                
-            raw_cmd = engine_instance.backend.get_uninstall_cmd(packages)
-            cmd = ["pkexec"] + raw_cmd if shutil.which("pkexec") else ["sudo"] + raw_cmd
-            
-            try:
-                res = subprocess.run(cmd, capture_output=True, text=True)
-                if res.returncode == 0:
-                    self.wfile.write(json.dumps({"success": True, "message": "Packages uninstalled successfully."}).encode("utf-8"))
-                else:
-                    msg = res.stderr or res.stdout or f"Return code: {res.returncode}"
-                    self.wfile.write(json.dumps({"success": False, "message": msg}).encode("utf-8"))
-            except Exception as e:
-                self.wfile.write(json.dumps({"success": False, "message": str(e)}).encode("utf-8"))
-                
-        elif path == "/api/cache-clean":
-            mode = data.get("mode", "1")
-            cmd = engine_instance.backend.clean_cache(mode)
-            if not cmd:
-                self.wfile.write(json.dumps({"success": False, "message": "Action not supported by package manager."}).encode("utf-8"))
-                return
-            run_cmd = ["pkexec"] + cmd[1:] if shutil.which("pkexec") else cmd
-            try:
-                res = subprocess.run(run_cmd, capture_output=True, text=True)
-                if res.returncode == 0:
-                    self.wfile.write(json.dumps({"success": True, "message": "Cache cleaned successfully."}).encode("utf-8"))
-                else:
-                    self.wfile.write(json.dumps({"success": False, "message": res.stderr or "Error cleaning cache."}).encode("utf-8"))
-            except Exception as e:
-                self.wfile.write(json.dumps({"success": False, "message": str(e)}).encode("utf-8"))
-                
-        elif path == "/api/journal-vacuum":
-            mode = str(data.get("mode", "1"))
-            sub_cmd = []
-            if mode == "1":
-                sub_cmd = ["journalctl", "--vacuum-time=2d"]
-            elif mode == "2":
-                sub_cmd = ["journalctl", "--vacuum-time=7d"]
-            elif mode == "3":
-                sub_cmd = ["journalctl", "--vacuum-size=100M"]
-            elif mode == "4":
-                sub_cmd = ["journalctl", "--vacuum-size=500M"]
-                
-            cmd = ["pkexec"] + sub_cmd if shutil.which("pkexec") else ["sudo"] + sub_cmd
-            try:
-                res = subprocess.run(cmd, capture_output=True, text=True)
-                if res.returncode == 0:
-                    self.wfile.write(json.dumps({"success": True, "message": "Journal logs vacuumed successfully."}).encode("utf-8"))
-                else:
-                    self.wfile.write(json.dumps({"success": False, "message": res.stderr or "Error cleaning journal logs."}).encode("utf-8"))
-            except Exception as e:
-                self.wfile.write(json.dumps({"success": False, "message": str(e)}).encode("utf-8"))
-
-def start_gui_server(port):
-    server = HTTPServer(('127.0.0.1', port), InraHTTPHandler)
-    url = f"http://127.0.0.1:{port}"
-    print(f"Starting local GUI Web server at {url} ...")
-    threading.Thread(target=lambda: webbrowser.open(url)).start()
-    
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
 
 # =====================================================================
 # MAIN ENTRYPOINT
@@ -2931,8 +2788,6 @@ def main():
     parser.add_argument('--json', action='store_true', help="Output scan result as JSON and exit")
     parser.add_argument('--no-color', action='store_true', help="Disable color outputs")
     parser.add_argument('--ignore-file', help="Path to custom ignore config file (default: ~/.config/inra/ignore.conf)")
-    parser.add_argument('--gui', action='store_true', help="Start beautiful local Web GUI browser application")
-    parser.add_argument('-p', '--port', type=int, default=17890, help="Port to run local GUI server on (default: 17890)")
     parser.add_argument('--purge', nargs='+', help="Purge the specified packages and their recursive orphans")
     parser.add_argument('--clean-cache', choices=['1', '2'], help="Clean package cache (1=uninstalled only, 2=all)")
     parser.add_argument('--vacuum-journal', choices=['1', '2', '3', '4'], help="Vacuum systemd journal (1=2d, 2=7d, 3=100M, 4=500M)")
@@ -2998,11 +2853,6 @@ def main():
         res = subprocess.run(sub_cmd)
         sys.exit(res.returncode)
 
-    if args.gui:
-        print("Scanning system packages and computing critical dependency trees...")
-        engine_instance.load_system_state()
-        start_gui_server(args.port)
-        return
 
     if args.json:
         categories = engine_instance.load_system_state()

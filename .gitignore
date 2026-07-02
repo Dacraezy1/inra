@@ -2,6 +2,7 @@ build/
 dist/
 appimagetool
 appimagetool-x86_64.AppImage
+inra-gui
 *.rpm
 *.deb
 *.tar.gz

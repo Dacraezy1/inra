@@ -14,10 +14,11 @@ INRA currently supports **Arch Linux** (Pacman), **Debian/Ubuntu** (APT/DPKG), *
    - Live category search (press `/` key to filter list).
    - Multi-column sort options (by individual size, recursive size, package name, install date).
    - Package inspector showing license, URL, and sub-dependencies.
-3. **Futuristic Local Web GUI (`--gui`)**:
-   - Responsive dark-mode dashboard with space utilization stats.
-   - Dynamic tables, search filters, and detail drawers.
-   - Single-click package purging with real-time status output.
+3. **Futuristic Native Qt6 GUI (`inra-gui`)**:
+   - Super-fast compiled desktop application styled with a premium dark cyber theme.
+   - Live search filters, checkable tables, and category filters.
+   - Single-click package purging with a real-time console log drawer.
+   - Native security integration running commands through standard `pkexec` dialog authorization.
 4. **True Dependency Resolution**: Detects strict and optional orphans (dependencies installed automatically but no longer required by any package).
 5. **Smart Heuristic Classification**: Organizes explicit packages into logical tabs:
    - **GUI Applications** (detects `.desktop` files owned by packages)
@@ -53,12 +54,12 @@ Launch the TUI interface in your terminal:
 - Press **B** to go back.
 - Press **R** to review and run the cleanup.
 
-#### Beautiful local Web GUI Mode
-Launch the local dashboard served at `http://127.0.0.1:17890` (automatically opens browser):
+#### Beautiful Native Qt6 GUI
+Launch the native desktop interface:
 ```bash
-./inra --gui
+./inra-gui
 ```
-*Note: To change port, use `--port <number>`.*
+*(Note: You can compile it locally in the `gui` folder using `cmake` and `make`)*
 
 #### Non-Interactive Dry Run
 Print recommendations directly to stdout:
