@@ -1,0 +1,11 @@
+build/
+dist/
+appimagetool
+appimagetool-x86_64.AppImage
+*.rpm
+*.deb
+*.tar.gz
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store

@@ -18,7 +18,8 @@ mkdir -p dist
 # 1. Build .tar.gz (Universal Source Package)
 echo "Generating .tar.gz archive..."
 mkdir -p build/inra-${VERSION}
-cp inra build/inra-${VERSION}/
+cp inra.py build/inra-${VERSION}/
+cp -P inra build/inra-${VERSION}/
 cp README.md build/inra-${VERSION}/
 cp LICENSE build/inra-${VERSION}/
 cp inra.desktop build/inra-${VERSION}/
@@ -46,7 +47,7 @@ Description: Smart, Universal package purger and system cleaner.
  Supports Arch Linux, Debian/Ubuntu, and Fedora/RHEL with interactive TUI and responsive Web GUI modes.
 EOF
 
-cp inra ${DEB_DIR}/usr/bin/
+cp inra.py ${DEB_DIR}/usr/bin/inra
 chmod +x ${DEB_DIR}/usr/bin/inra
 cp inra.desktop ${DEB_DIR}/usr/share/applications/
 cp inra.jpg ${DEB_DIR}/usr/share/pixmaps/inra.jpg
@@ -60,7 +61,7 @@ if command -v alien &> /dev/null; then
     echo "Generating .rpm package via alien..."
     # Convert .deb to .rpm. Alien produces a file named like inra-1.0.0-2.noarch.rpm
     # We rename it to match our format.
-    alien --to-rpm --nodeps dist/inra-${VERSION}_all.deb
+    alien --to-rpm dist/inra-${VERSION}_all.deb
     mv inra-*.rpm dist/inra-${VERSION}.noarch.rpm
     echo "Created: dist/inra-${VERSION}.noarch.rpm"
 else
@@ -76,7 +77,7 @@ mkdir -p ${APPDIR}/usr/share/applications
 mkdir -p ${APPDIR}/usr/share/pixmaps
 
 # Copy files
-cp inra ${APPDIR}/usr/bin/inra
+cp inra.py ${APPDIR}/usr/bin/inra
 chmod +x ${APPDIR}/usr/bin/inra
 cp inra.desktop ${APPDIR}/
 cp inra.jpg ${APPDIR}/
